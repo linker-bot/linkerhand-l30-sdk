@@ -1,0 +1,259 @@
+import sys
+import rclpy,time,threading
+from rclpy.node import Node
+from std_msgs.msg import String, Header, Float32MultiArray
+from sensor_msgs.msg import JointState
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSlider,
+    QLabel, QPushButton, QLineEdit, QGridLayout, QScrollArea
+)
+
+class HandControlNode(Node):
+    def __init__(self):
+        super().__init__('hand_control_node')
+        # 声明参数（带默认值）
+        self.declare_parameter('hand_type', 'right')
+        self.declare_parameter('hand_joint', 'L30')
+        self.declare_parameter('topic_hz', 60)
+        self.declare_parameter('is_touch', False)
+        
+        # 获取参数值
+        self.hand_type = self.get_parameter('hand_type').value
+        self.hand_joint = self.get_parameter('hand_joint').value
+        self.hz = self.get_parameter('topic_hz').value
+        self.is_touch = self.get_parameter('is_touch').value
+        self.last_msg = []
+        self.publisher = self.create_publisher(JointState, f'/cb_{self.hand_type}_hand_control_cmd', 10)
+        # self.publisher_wrist = self.create_publisher(JointState, f'/cb_{self.hand_type}_wrist_control_cmd', 10)
+    def get_hand(self):
+        return self.hand_type,self.hand_joint,self.hz,self.is_touch
+    def publish_control_cmd(self, msg):
+        self.publisher.publish(msg)
+    # def publish_wrist_cmd(self, msg):
+    #     self.publisher_wrist.publish(msg)
+
+class GuiApp(QWidget):
+    handle_button_click = pyqtSignal(str)
+    add_button_handle = pyqtSignal(str)
+
+    def __init__(self,hand_type="right",hand_joint="L30",hz=30):
+        super().__init__()
+        self.hand_type = hand_type
+        self.hand_joint = hand_joint
+        self.interval = 1.0 / hz  # 每次间隔 0.033 秒
+        self.last_msg = JointState()
+        self.last_wrist_msg = JointState()
+        #self.yaml = LoadWriteYaml()
+        self.setWindowTitle(f'ROS2 Control Linker Hand {hand_type} {hand_joint}')
+        self.setFixedSize(800, 900)
+        self.node = None
+        self.buttons = []
+        self.control_sliders = []
+        self.slider_labels = {}
+        self.row = 0
+        self.column = 0
+        self.BUTTONS_PER_ROW = 3  # 每行最多 3 个按钮
+
+        main_layout = QHBoxLayout()
+        self.setLayout(main_layout)
+
+        # 左侧滑动条
+        self.left_layout = QVBoxLayout()
+        self.slider_list = ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
+        self.init_hand()
+        self.create_sliders(self.slider_list)
+        left_widget = QWidget()
+        left_widget.setLayout(self.left_layout)
+        main_layout.addWidget(left_widget, alignment=Qt.AlignTop)
+
+
+        
+
+
+    def init_hand(self):
+        if self.hand_joint == "L30":
+            # L25
+            self.init_pos = [255] * 17
+            # topic
+            self.joint_name = ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
+
+        self.slider_list = self.joint_name
+
+    def on_button_clicked(self,text):
+        print("_-" * 20, flush=True)
+        print(text, flush=True)
+
+    def create_sliders(self, slider_names):
+        for name in slider_names:
+            slider = QSlider(Qt.Horizontal)
+            '''
+            '大拇指侧摆': [3, 0, 40, 1, 1],      # 负向
+    '拇指旋转': [4, 0, 80, 2, 1],       # 负向
+    '拇指弯曲': [1, 0, 70, 3, 1],        # 正向
+    '拇指指尖': [2, 0, 60, 4, 1],         # 正向
+    # 食指
+    '食指侧摆': [14, -10, 10, 5, 1],     # 负向
+    '食指指根弯曲': [15, 0, 80, 6, 1],    # 负向
+    '食指指尖': [16, 0, 80, 7, 1],       # 负向
+    # 中指
+    '中指侧摆': [13, -10, 10, 8, 1],      # 负向
+    '中指指根': [8, 0, 80, 9, 1],        # 负向
+    '中指指尖': [9, 0, 80, 10, 1],      # 负向
+    # 无名指
+    '无名指侧摆': [5, -10, 10, 11, -1],    # 正向
+    '无名指指根': [7, 0, 80, 12, 1],      # 负
+    '无名指指尖': [6, 0, 80, 13, 1],      # 正向
+    # 小指
+    '小指侧摆': [12, -10, 10, 14, 1],     # 负向
+    '小指指根': [10, 0, 80, 15, 1],       # 正向
+    '小指指尖': [11, 0, 80, 16, 1],      # 负向
+    # 手腕
+    '手腕': [17, -50, 50, 17, 1]          # 正向
+            '''
+            print(name, flush=True)
+            if name == "大拇指侧摆":
+                slider.setRange(0, 40)
+                slider.setValue(0)
+            elif name == "拇指旋转":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "拇指弯曲":
+                slider.setRange(0, 70)
+                slider.setValue(0)
+            elif name == "拇指指尖":
+                slider.setRange(0, 60)
+                slider.setValue(0)
+            elif name == "食指侧摆":
+                slider.setRange(-10, 10)
+                slider.setValue(0)
+            elif name == "食指指根弯曲":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "食指指尖":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "中指侧摆":
+                slider.setRange(-10, 10)
+                slider.setValue(0)
+            elif name == "中指指根":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "中指指尖":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "无名指侧摆":
+                slider.setRange(-10, 10)
+                slider.setValue(0)
+            elif name == "无名指指根":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "无名指指尖":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "小指侧摆":
+                slider.setRange(-10, 10)
+                slider.setValue(0)
+            elif name == "小指指根":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "小指指尖":
+                slider.setRange(0, 80)
+                slider.setValue(0)
+            elif name == "手腕":
+                slider.setRange(-50, 50)
+                slider.setValue(0)
+            slider.setTickPosition(QSlider.TicksBelow)
+            slider.setTickInterval(10)
+
+            label = QLabel(f"{name} 0:")
+            self.slider_labels[slider] = (label, name)
+
+            slider.valueChanged.connect(self.slider_value_changed)
+
+            h_layout = QHBoxLayout()
+            h_layout.addWidget(label)
+            h_layout.addWidget(slider)
+
+            item_widget = QWidget()
+            item_widget.setLayout(h_layout)
+
+            self.left_layout.addWidget(item_widget)
+            self.control_sliders.append(slider)
+
+    def slider_value_changed(self):
+        all_values = [slider.value() for slider in self.control_sliders]
+
+        sender_slider = self.sender()
+        if sender_slider in self.slider_labels:
+            label, name = self.slider_labels[sender_slider]
+            label.setText(f"{name} {sender_slider.value()}:")
+
+        self.last_msg = self.joint_state_msg(all_values)
+        
+    def loop_pub(self):
+        self.thread_get_state = threading.Thread(target=self.pub_msg)
+        self.thread_get_state.daemon = True
+        self.thread_get_state.start()
+    def pub_msg(self):
+        while True:
+            start = time.time()
+            self.node.publish_control_cmd(self.last_msg)  # 只发布前16个关节的状态
+            # self.node.publish_wrist_cmd(self.last_wrist_msg)  # 发布手腕状态
+            elapsed = time.time() - start
+            time.sleep(max(0, self.interval - elapsed))
+
+
+    def joint_state_msg(self, pose,vel=[]):
+        joint_state = JointState()
+        joint_state.header = Header()
+        joint_state.header.stamp = self.node.get_clock().now().to_msg()
+        joint_state.name = []
+        joint_state.position = [float(x) for x in pose]
+        if len(vel) > 1:
+            joint_state.velocity = [float(x) for x in vel]
+        else:
+            joint_state.velocity = [0.0] * len(pose)
+        joint_state.effort = [0.0] * len(pose)
+        return joint_state
+
+    def add_button_to_right_layout(self):
+        text = self.input_field.text().strip()
+        if text:
+            button = QPushButton(text)
+            button.setFixedSize(100, 30)
+            button.clicked.connect(lambda checked, text=text: self.handle_button_click.emit(text))
+
+            # 添加到网格布局
+            self.scroll_layout.addWidget(button, self.row, self.column, alignment=Qt.AlignLeft | Qt.AlignTop)
+
+            # 更新行列位置
+            self.column += 1
+            if self.column >= self.BUTTONS_PER_ROW:
+                self.column = 0
+                self.row += 1
+
+            self.input_field.clear()
+            self.buttons.append(button)
+            self.add_button_handle.emit(text)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = HandControlNode()
+    time.sleep(1)
+    hand_type,hand_joint,hz,is_touch = node.get_hand()
+    
+
+    app = QApplication(sys.argv)
+    gui = GuiApp(hand_type=hand_type,hand_joint=hand_joint,hz=hz)
+    gui.node = node
+    time.sleep(1)
+    gui.loop_pub()
+    gui.show()
+
+    sys.exit(app.exec_())
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
