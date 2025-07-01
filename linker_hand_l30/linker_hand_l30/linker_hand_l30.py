@@ -182,7 +182,7 @@ class LinkerHandL30(Node):
         joint_state = JointState()
         joint_state.header.stamp = self.get_clock().now().to_msg()
         joint_state.name = joint_names
-        joint_state.position = positions
+        joint_state.position = [float(p) for p in positions]
         joint_state.velocity = [0.0] * len(positions)
         joint_state.effort = [0.0] * len(positions)
         return joint_state
