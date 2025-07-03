@@ -25,7 +25,7 @@ class LinkerHandL30(Node):
         self.is_touch = self.get_parameter('is_touch').value
 
         self.hand_api = L30HandAPI()
-        self.last_pose = []
+        self.last_pose = [0.0] * 17
         self.lock = True
         success, msg = self.hand_api.connect_motor(self.usb_port) # "/dev/ttyUSB0"
         self.publisher_hand_state_ = self.create_publisher(JointState, f'/cb_{self.hand_type}_hand_state', 10)
@@ -182,7 +182,7 @@ class LinkerHandL30(Node):
         joint_state = JointState()
         joint_state.header.stamp = self.get_clock().now().to_msg()
         joint_state.name = joint_names
-        joint_state.position = positions
+        joint_state.position = [float(p) for p in positions]
         joint_state.velocity = [0.0] * len(positions)
         joint_state.effort = [0.0] * len(positions)
         return joint_state
