@@ -85,4 +85,4 @@ $ ros2 launch gui_control gui_control.launch.py
 ```
 
 ## 7 上位机
-[带控制GUI界面的上位机](python_api/demo.py)
+[带控制GUI界面的上位机](python_api/demo.py) python3 demo.py
