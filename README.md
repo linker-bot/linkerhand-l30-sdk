@@ -13,6 +13,10 @@ LinkerHand 灵巧手 ROS SDK 是由灵心巧手（北京）科技有限公司开
 3. 请保护好灵巧手。
 
 # 3. **版本说明**
+V1.0.2
+1. 支持L30线驱版本LinkeerHand灵巧手左手和右手
+2. 支持手指运行速度设置
+
 V1.0.1
 1. 支持L30线驱版本LinkeerHand灵巧手
 2. GUI控制界面
@@ -29,7 +33,7 @@ V1.0.1
 
 * ROS2版本：Jazzy
 
-* Python版本：V3.13.2
+* Python版本：V3.12
 
 * 硬件：amd64_x86/arm64 配备 5v标准USB接口
 
@@ -43,6 +47,7 @@ $ git clone https://github.com/linkerbotai/linker_hand_l30_sdk.git    #获取SDK
 
 ## 4.3 确认硬件USB端口，修改配置文件
 - 接通电源，USB插在上位机上后，查询USB端口。确定端口后修改linker_hand_l30.launch.py(linker_hand_l30/launch/linker_hand_l30.launch.py)13行，修改为查询到的端口
+- 修改linker_hand_l30/launch/linker_hand_l30.launch.py，按照参数说明修改左手 or 右手
 ```bash
 $ ls /dev/ttyUSB*
 $/dev/ttyUSB0  # 说明设备识别在USB0端口上
@@ -68,6 +73,7 @@ $ [linker_hand_l30_node-1] 2025-06-26 15:45:43  连接手部设备成功
 ```
 ## 5.1启动GUI控制L30灵巧手
  - 启动SDK后，新开一个终端。注:由于有界面，不能使用ssh远程连接开启GUI
+ - 修改gui_control/launch/gui_control.launch.py 按照参数说明，修改左手 or 右手
 ```bash
 $ cd linker_hand_l30_sdk
 $ source ./install/setup.bash
@@ -76,9 +82,24 @@ $ ros2 launch gui_control gui_control.launch.py
 
 # 6 TOPIC说明
 ```bash
-/cb_right_hand_control_cmd # 控制右手运动话题  (0~90)度S
+/cb_right_hand_control_cmd # 控制右手运动话题  (0~90)度
+/cb_hand_setting_cmd #设置手指运行速度
 ```
-## 6.1 position说明
+## 6.1设置速度示例
+```python
+self.setting_pub = self.create_publisher(String, f'/cb_hand_setting_cmd', 10)
+def _hand_setting_cb(self):
+        dic = {
+            "setting_cmd": "set_speed",
+            "params": {
+                "speed": 255  # 设置速度为100
+            }
+        }
+        msg = String()
+        msg.data = json.dumps(dic)
+        self.setting_pub.publish(msg)
+```
+## 6.2 position说明
 ```bash
 ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
 ```
