@@ -46,7 +46,6 @@ $ git clone https://github.com/linkerbotai/linker_hand_l30_sdk.git    #获取SDK
 ```bash
 $ ls /dev/ttyUSB*
 $/dev/ttyUSB0  # 说明设备识别在USB0端口上
-$ sudo chmod 777 /dev/ttyUSB0  # 给端口权限
 $ sudo vim linker_hand_l30/launch/linker_hand_l30.launch.py
 ```
 
@@ -55,7 +54,7 @@ $ sudo vim linker_hand_l30/launch/linker_hand_l30.launch.py
 ```bash
 $ cd linker_hand_l30_sdk/src/linker_hand_l30_sdk    #进入目录
 $ pip install -r requirements.txt    #安装所需依赖
-$ pip install l30_hand_api-1.0.0-py3-none-any.whl
+$ pip install l30_hand_api-1.0.4-py3-none-any.whl
 $ cd linker_hand_l30_sdk # 回到工程目录
 $ colcon build --symlink-install    #编译和构建ROS包
 ```
@@ -83,6 +82,3 @@ $ ros2 launch gui_control gui_control.launch.py
 ```bash
 ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
 ```
-
-## 7 上位机
-[带控制GUI界面的上位机](python_api/demo.py) python3 demo.py

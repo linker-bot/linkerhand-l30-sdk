@@ -1,4 +1,4 @@
-import sys
+import sys,json
 import rclpy,time,threading
 from rclpy.node import Node
 from std_msgs.msg import String, Header, Float32MultiArray
@@ -26,10 +26,28 @@ class HandControlNode(Node):
         self.is_touch = self.get_parameter('is_touch').value
         self.last_msg = []
         self.publisher = self.create_publisher(JointState, f'/cb_{self.hand_type}_hand_control_cmd', 10)
+        self.setting_pub = self.create_publisher(String, f'/cb_hand_setting_cmd', 10)
+        self._hand_setting_cb()
+
+
+    def _hand_setting_cb(self):
+        dic = {
+            "setting_cmd": "set_speed",
+            "params": {
+                "speed": 255  # 设置速度为100
+            }
+        }
+        msg = String()
+        msg.data = json.dumps(dic)
+        self.setting_pub.publish(msg)
+
     def get_hand(self):
         return self.hand_type,self.hand_joint,self.hz,self.is_touch
+    
     def publish_control_cmd(self, msg):
         self.publisher.publish(msg)
+
+    
 
 class GuiApp(QWidget):
     handle_button_click = pyqtSignal(str)

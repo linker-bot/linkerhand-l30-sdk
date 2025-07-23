@@ -11,7 +11,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'usb_port': '/dev/ttyUSB0',
-                'hand_type': 'right',
+                'hand_type': 'left',
                 'hand_joint': "L30",
                 'is_touch': True,
             }],

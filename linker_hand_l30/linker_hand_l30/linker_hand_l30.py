@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
-import rclpy,time, threading
+import rclpy,time, threading, json, sys
 from rclpy.node import Node
 from std_msgs.msg import String
 from sensor_msgs.msg import JointState
@@ -23,11 +23,22 @@ class LinkerHandL30(Node):
         self.hand_type = self.get_parameter('hand_type').value
         self.hand_joint = self.get_parameter('hand_joint').value
         self.is_touch = self.get_parameter('is_touch').value
-
+        self.hand_setting_sub = self.create_subscription(String,'/cb_hand_setting_cmd', self.hand_setting_cb, 10)
         self.hand_api = L30HandAPI()
-        self.last_pose = [0.0] * 17
+        self.last_pose = []
         self.lock = True
-        success, msg = self.hand_api.connect_motor(self.usb_port) # "/dev/ttyUSB0"
+        success, msg, hand_type = self.hand_api.connect_motor(self.usb_port) # "/dev/ttyUSB0"
+        if success:
+            # 确保界面模块使用正确的HAND_TYPE
+            from l30_hand_api.motor_mapping import set_and_get_hand_type_by_wrist_id
+            if 117 in self.hand_api.motors:
+                set_and_get_hand_type_by_wrist_id(117)
+                print("检测到左手，设置HAND_TYPE为left")
+            elif 17 in self.hand_api.motors:
+                set_and_get_hand_type_by_wrist_id(17)
+                print("检测到右手，设置HAND_TYPE为right")
+            
+            self.is_connected = True
         self.publisher_hand_state_ = self.create_publisher(JointState, f'/cb_{self.hand_type}_hand_state', 10)
         if success:
             ColorMsg(msg="连接手部设备成功", color="green")
@@ -69,6 +80,8 @@ class LinkerHandL30(Node):
             self.publisher_hand_state_.publish(msg)
             rclpy.spin_once(self, timeout_sec=0.01)  # 确保节点在发布消息时不会阻塞
             time.sleep(0.02)  # 控制发布频率
+
+
     def timer_callback(self):
         
         '''
@@ -140,9 +153,6 @@ class LinkerHandL30(Node):
             motor_angle = 180 - clamped_angle
         else:
             motor_angle = clamped_angle + 180
-
-        # print(
-        #     f"电机 {motor_id} - 关节角度 {joint_angle:.1f}° (限制后: {clamped_angle:.1f}°) 转换为电机角度 {motor_angle:.1f}°")
         return motor_angle
 
     def motor_to_joint_angle(self, motor_id: int, motor_angle: float) -> float:
@@ -182,14 +192,45 @@ class LinkerHandL30(Node):
         joint_state = JointState()
         joint_state.header.stamp = self.get_clock().now().to_msg()
         joint_state.name = joint_names
-        joint_state.position = [float(p) for p in positions]
+        joint_state.position = positions
         joint_state.velocity = [0.0] * len(positions)
         joint_state.effort = [0.0] * len(positions)
         return joint_state
+    
+    def disconnect_motor(self):
+        """断开电机连接并更新界面状态"""
+        print("正在断开电机连接...", flush=True)
+        if self.is_connected:
+            self.hand_api.disconnect_motor()
+
+        # 重置连接状态
+        self.is_connected = False
+
+    def hand_setting_cb(self,msg):
+        '''控制命令回调'''
+        data = json.loads(msg.data)
+        print(f"Received setting command: {data['setting_cmd']}",flush=True)
+        try:
+            if data["setting_cmd"] == "set_speed": # Set speed
+                speed = int(data["params"]["speed"])
+                if speed < 0 or speed > 300:
+                    print("Speed must be between 0 and 300", flush=True)
+                    return
+                self.hand_api.set_all_velocity_sync(speed)
+                ColorMsg(msg=f"Setting Speed: {speed}", color="green")
+        except Exception as e:
+            print(f"Error in hand_setting_cb: {e}", flush=True)
+            ColorMsg(msg=f"Error in hand_setting_cb: {e}", color="red")
 
 def main(args=None):
     rclpy.init(args=args)
     node = LinkerHandL30()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)         # 主循环，监听 ROS 回调
+    except KeyboardInterrupt:
+        print("收到 Ctrl+C，准备退出...")
+    finally:      # 关闭 CAN 或其他硬件资源
+        node.disconnect_motor()
+        node.destroy_node()      # 销毁 ROS 节点
+        rclpy.shutdown()         # 关闭 ROS
+        print("程序已退出。")
