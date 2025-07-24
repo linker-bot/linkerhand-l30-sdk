@@ -51,6 +51,7 @@ $ git clone https://github.com/linkerbotai/linker_hand_l30_sdk.git    #获取SDK
 ```bash
 $ ls /dev/ttyUSB*
 $/dev/ttyUSB0  # 说明设备识别在USB0端口上
+$ sudo chmod 777 /dev/ttyUSB0
 $ sudo vim linker_hand_l30/launch/linker_hand_l30.launch.py
 ```
 
