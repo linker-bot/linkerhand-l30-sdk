@@ -119,20 +119,15 @@ class GuiApp(QWidget):
         precision = 1
         for name in slider_names:
             slider = QSlider(Qt.Horizontal)
-            if name not in joint_ranges:
-                return
-            # 缩放因子
-            factor = 10 ** precision
-            min_val, max_val = joint_ranges[name]
-            int_min = int(min_val * factor)
-            int_max = int(max_val * factor)
-
-            # 创建滑动条
+            # 全部滑动条范围固定为0~255
             slider = QSlider(Qt.Horizontal)
-            slider.setRange(int_min, int_max)
-            slider.setValue(int(0 * factor))
+            slider.setRange(0, 255)
+            if name == "手腕" or name == "食指侧摆" or name == "中指侧摆" or name == "无名指侧摆" or name == "小指侧摆":
+                slider.setValue(127)
+            else:
+                slider.setValue(0)
             slider.setTickPosition(QSlider.TicksBelow)
-            slider.setTickInterval(factor)  # 例如 factor=10 表示步长0.1
+            slider.setTickInterval(1)  # 你也可以调整步长，比如10
 
             # 标签
             label = QLabel(f"{name} 0.0:")
@@ -155,13 +150,11 @@ class GuiApp(QWidget):
 
     def slider_value_changed(self):
         all_values = [slider.value() for slider in self.control_sliders]
-        all_values = [round(val / 10, 1) for val in all_values]
 
         sender_slider = self.sender()
         if sender_slider in self.slider_labels:
             label, name = self.slider_labels[sender_slider]
-            label.setText(f"{name} {(sender_slider.value()/10)}:")
-
+            label.setText(f"{name} {sender_slider.value()}:")  # 直接显示整数值
         self.last_msg = self.joint_state_msg(all_values)
         
     def loop_pub(self):

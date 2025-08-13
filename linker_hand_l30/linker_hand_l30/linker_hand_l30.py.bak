@@ -1,0 +1,288 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+import rclpy,time, threading, json, sys
+from rclpy.node import Node
+from std_msgs.msg import String
+from sensor_msgs.msg import JointState
+from .config.setting import *
+from .utils.color_msg import ColorMsg
+from .core.canfd.l30_canfd_controller_v2 import LinkerHandL30CANFD
+from .core.canfd.l30_canfd_controller import DexterousHandController
+
+
+class LinkerHandL30(Node):
+    DEVICE_ID_RIGHT = 0x01
+    DEVICE_ID_LEFT = 0x02
+    def __init__(self):
+        super().__init__('linker_hand_l30_node')
+        # 声明参数（带默认值）
+        self.declare_parameter('hand_type', 'right')
+        self.declare_parameter('hand_joint', 'L30')
+        self.declare_parameter('is_touch', False)
+
+        self.hand_type = self.get_parameter('hand_type').value
+        self.hand_joint = self.get_parameter('hand_joint').value
+        self.is_touch = self.get_parameter('is_touch').value
+        # ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
+        # topic与电机顺序映射表
+        self.joint_map = {
+            0: 2,  1: 3,  2: 0,  3: 1,
+            4: 13, 5: 14, 6: 15, 
+            7: 12, 8: 7,  9: 8,
+            10: 4, 11: 6, 12: 5, 
+            13: 9, 14: 10, 15: 11,
+            16: 16
+        }
+        time.sleep(0.5)
+        # 接收指令topic
+        self.hand_setting_sub = self.create_subscription(String,'/cb_hand_setting_cmd', self.hand_setting_cb, 10)
+        # 记录最新一条topic控制指令坐标范围数据 0-255
+        self.last_pose = []
+        # 记录最新一条topic控制指令速度数据 0-255
+        self.last_vel = []
+        # 发布灵巧手状态topic
+        self.publisher_hand_state_ = self.create_publisher(JointState, f'/cb_{self.hand_type}_hand_state', 10)
+        # 接收控制指令话题
+        self.control_topci = f'/cb_{self.hand_type}_hand_control_cmd'
+        self.subscription = self.create_subscription(
+            JointState,
+            self.control_topci,
+            self.hand_callback,
+            10)
+        self._init_linker_hand()
+        # 创建并启动线程
+        t = threading.Thread(target=self.run)
+        t.daemon = True  # 设置为守护线程（主线程结束时它会自动退出）
+        t.start()
+        
+    def _init_linker_hand(self):
+        # 根据左右手配置进行初始化灵巧手核心API
+        if self.hand_type == 'right':
+            device_id = self.DEVICE_ID_RIGHT
+        elif self.hand_type == 'left':
+            device_id = self.DEVICE_ID_LEFT
+        self.hand_api = LinkerHandL30CANFD(device_id=device_id)
+        self.send = DexterousHandController(device_id=device_id)
+        self.send.connect()
+        # 灵巧手关节索引中文名称
+        self.joint_name = ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
+        self.joint_name_en = [
+            "Thumb_Side_Swing",
+            "Thumb_Rotation",
+            "Thumb_Bend",
+            "Thumb_Tip",
+            "Index_Side_Swing",
+            "Index_Base_Bend",
+            "Index_Tip",
+            "Middle_Side_Swing",
+            "Middle_Base",
+            "Middle_Tip",
+            "Ring_Side_Swing",
+            "Ring_Base",
+            "Ring_Tip",
+            "Little_Side_Swing",
+            "Little_Base",
+            "Little_Tip",
+            "Wrist"
+        ]
+        # 灵巧手硬件配置信息
+        self.product_model, self.serial_num, self.soft_ver, self.hard_ver, self.hand_side = self.hand_api.get_device_info()
+        hand_info =  {
+                "产品型号": self.product_model,
+                "产品序列号": self.serial_num,
+                "软件版本号": self.soft_ver,
+                "硬件版本号": self.hard_ver,
+                "左右手标志": self.hand_side
+            }
+        ColorMsg(msg=f"{hand_info}", color="green")
+        ColorMsg(msg=f"SDK_VERSION:{SDK_VERSION}", color="green")
+        # 设置速度
+        speed = [100] * 17
+        speed_dic = {i + 1: val for i, val in enumerate(speed)}
+        set_speed = self.hand_api.set_target_speeds(speed_dic)
+        if set_speed == True:
+            ColorMsg(msg=f"设置速度成功:{speed}", color="green")
+        else:
+            ColorMsg(msg=f"设置速度失败:{speed}", color="red")
+        # 设置扭矩
+        torques = [800] * 17
+        torque_dic = {i + 1: val for i, val in enumerate(torques)}
+        set_torques = self.hand_api.set_target_torques(torque_dic)
+        if set_torques == True:
+            ColorMsg(msg=f"设置扭矩成功:{torques}", color="green")
+        else:
+            ColorMsg(msg=f"设置扭矩失败:{torques}", color="red")
+        # 设置关节为张开
+        pose = [42, 36, 51, 23, 128, 37, 36, 36, 36, 40, 35, 110, 124, 91, 38, 40, 127.5]
+        pose_dic = {i + 1: val for i, val in enumerate(pose)}
+        p = self.hand_api.denormalize_motor_values(pose_dic)
+        #set_pose = self.hand_api.set_target_positions(p)
+        set_pose = True
+        time.sleep(1)
+        if set_pose == True:
+            ColorMsg(msg=f"初始位置：{p}", color="green")
+        else:
+            ColorMsg(msg=f"设置初始位置失败:{pose}", color="red")
+        # 读取电机当前位置
+        pose, pos = self.hand_api.get_current_positions()
+        pose_range = self.hand_api.normalize_raw_motor_values(pose)
+        if pos:
+            ColorMsg(msg=f"当前位置:{pose_range}", color="green")
+            for k, v in pos.items():
+                print(f"电机ID {k}: {v:.2f}度")
+        else:
+            print("读取失败")
+        
+
+    def pub_hand_state(self):
+        while rclpy.ok():
+            msg = self.joint_msg(positions=self.last_pose, joint_names=self.joint_name_en)
+            self.publisher_hand_state_.publish(msg)
+            rclpy.spin_once(self, timeout_sec=0.01)  # 确保节点在发布消息时不会阻塞
+            time.sleep(0.02)  # 控制发布频率
+
+
+    def timer_callback(self):
+        
+        '''
+        ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
+        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
+        [3, 4, 1, 2, 14, 15, 16, 13, 8, 9, 5, 7, 6, 12, 10, 11, 17]
+        '''
+        if len(self.get_publishers_info_by_topic(self.control_topci)) > 0 and len(self.last_pose) > 0:
+            #print(f"当前state: {self.last_pose}", flush=True)
+            pass
+        else:
+            current_pose = self.hand_api.read_current_positions()
+            for key,value in current_pose.items():
+                if key not in self.motor_ids:
+                    print(f"警告：电机 {key} 未在 motor_ids 中找到，跳过", flush=True)
+                    continue
+                # 将电机角度转换为关节角度
+                current_pose[key] = self.motor_to_joint_angle(key, value)
+            tmp_list = []
+            tmp_list = [int(current_pose.get(key, 0.0)) for key in self.motor_ids]
+            self.last_pose = tmp_list
+            #print(f"获取state: {self.last_pose}", flush=True)
+
+    def hand_callback(self,msg):
+        positions = list(msg.position)
+        velocity = list(msg.velocity)
+        if not positions:
+            pass
+        else:
+            self.last_pose = positions
+            self.last_vel = velocity
+
+        
+
+
+
+    
+
+    def joint_msg(self,positions=[],joint_names=[]):
+        joint_state = JointState()
+        joint_state.header.stamp = self.get_clock().now().to_msg()
+        joint_state.name = joint_names
+        joint_state.position = positions
+        joint_state.velocity = [0.0] * len(positions)
+        joint_state.effort = [0.0] * len(positions)
+        return joint_state
+    
+    
+
+    def hand_setting_cb(self,msg):
+        '''控制命令回调'''
+        data = json.loads(msg.data)
+        print(f"Received setting command: {data['setting_cmd']}",flush=True)
+        try:
+            if data["setting_cmd"] == "set_speed": # Set speed
+                speed = int(data["params"]["speed"])
+                if speed < 0 or speed > 300:
+                    print("Speed must be between 0 and 300", flush=True)
+                    return
+                self.hand_api.set_all_velocity_sync(speed)
+                ColorMsg(msg=f"Setting Speed: {speed}", color="green")
+        except Exception as e:
+            print(f"Error in hand_setting_cb: {e}", flush=True)
+            ColorMsg(msg=f"Error in hand_setting_cb: {e}", color="red")
+
+
+    def run(self):
+        tmp_pose = [0.0] * 17
+        while True:
+            # ----------------  发布L30状态  ----------------- #
+            # pose, pos = self.hand_api.get_current_positions()
+            # pose_range = self.hand_api.normalize_raw_motor_values(pose)
+            # tmp_p = [0.0] * 17
+            # for new_idx, old_idx in self.joint_map.items():
+            #     tmp_p[new_idx] = pose_range[old_idx]
+            # joint_state = self.joint_msg(positions=tmp_p, joint_names=self.joint_name_en)
+            # self.publisher_hand_state_.publish(joint_state)
+            # time.sleep(0.01)
+            # -------------------  接收到控制指令驱动电机  ------------------------ #
+            # speed = self.hand_api.get_target_velocity()
+            # time.sleep(0.01)
+            # errors = self.hand_api.get_error_status()
+            # print(errors, flush=True)
+            # time.sleep(0.01)
+            #if self.last_pose != []:
+                
+                # for new_idx, old_idx in self.joint_map.items():
+                #     tmp_pose[new_idx] = self.last_pose[old_idx]
+                # print(tmp_pose, flush=True)
+                # # 将list转dic
+                # p1 = {i + 1: val for i, val in enumerate(tmp_pose)}
+                # ['0大拇指侧摆', '1拇指旋转', '2拇指弯曲', '3拇指指尖', '4食指侧摆', '5食指指根弯曲', '6食指指尖', '7中指侧摆', '8中指指根', '9中指指尖', '10无名指侧摆', '11无名指指根', '12无名指指尖', '13小指侧摆', '14小指指根', '15小指指尖', '16手腕']
+            if self.last_pose != []:
+                #['0大拇指侧摆', '1拇指旋转', '2拇指弯曲', '3拇指指尖', '4食指侧摆', '5食指指根弯曲', '6食指指尖', '7中指侧摆', '8中指指根', '9中指指尖', '10无名指侧摆', '11无名指指根', '12无名指指尖', '13小指侧摆', '14小指指根', '15小指指尖', '16手腕']
+                
+                # 拇指
+                tmp_pose[0] = self.last_pose[2]
+                tmp_pose[1] = self.last_pose[3]
+                tmp_pose[2] = self.last_pose[0]
+                tmp_pose[3] = self.last_pose[1]
+                # 无名指
+                tmp_pose[4] = self.last_pose[10]
+                tmp_pose[5] = self.last_pose[12]
+                tmp_pose[6] = self.last_pose[11]
+                # 中指
+                tmp_pose[7] = self.last_pose[8]
+                tmp_pose[8] = self.last_pose[9]
+                tmp_pose[12] = self.last_pose[7]
+                # 小拇指
+                tmp_pose[9] = self.last_pose[14]
+                tmp_pose[10] = self.last_pose[15]
+                tmp_pose[11] = self.last_pose[13]
+                # 食指
+                tmp_pose[13] = self.last_pose[4]
+                tmp_pose[14] = self.last_pose[5]
+                tmp_pose[15] = self.last_pose[6]
+
+                tmp_pose[16] = self.last_pose[16]
+                p = self.hand_api.denormalize_motor_values(tmp_pose)
+                self.send.set_joint_positions(p)
+                #print(tmp_pose)
+                #self.last_pose = []
+            time.sleep(0.05)
+
+
+
+    def close(self):
+        self.hand_api.close()
+                
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = LinkerHandL30()
+    try:
+        #node.run()
+        rclpy.spin(node)         # 主循环，监听 ROS 回调
+    except KeyboardInterrupt:
+        print("收到 Ctrl+C，准备退出...")
+    finally:      # 关闭 CAN 或其他硬件资源
+        node.close()
+        node.destroy_node()      # 销毁 ROS 节点
+        rclpy.shutdown()         # 关闭 ROS
+        print("程序已退出。")

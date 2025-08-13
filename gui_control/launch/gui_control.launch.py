@@ -10,7 +10,7 @@ def generate_launch_description():
             name='left_hand_control_node',
             output='screen',
             parameters=[{
-                'hand_type': 'left',
+                'hand_type': 'right',
                 'hand_joint': "L30",
                 'topic_hz': 30,
                 'is_touch': True,

@@ -1,0 +1,204 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+import rclpy,time, threading, json, sys
+from rclpy.node import Node
+from std_msgs.msg import String
+from sensor_msgs.msg import JointState
+from .config.setting import *
+from .utils.color_msg import ColorMsg
+from .core.canfd.l30_canfd_controller import DexterousHandController
+
+
+
+
+class LinkerHandL30(Node):
+    def __init__(self):
+        super().__init__('linker_hand_l30_node')
+        # 声明参数（带默认值）
+        self.declare_parameter('hand_type', 'right')
+        self.declare_parameter('hand_joint', 'L30')
+        self.declare_parameter('is_touch', False)
+
+        self.hand_type = self.get_parameter('hand_type').value
+        self.hand_joint = self.get_parameter('hand_joint').value
+        self.is_touch = self.get_parameter('is_touch').value
+        self.control_topci = f'/cb_{self.hand_type}_hand_control_cmd'
+        self.last_pose = []
+        self.last_vel = []
+        # 灵巧手关节索引中文名称
+        self.joint_name = ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
+        self.joint_name_en = [
+            "Thumb_Side_Swing",
+            "Thumb_Rotation",
+            "Thumb_Bend",
+            "Thumb_Tip",
+            "Index_Side_Swing",
+            "Index_Base_Bend",
+            "Index_Tip",
+            "Middle_Side_Swing",
+            "Middle_Base",
+            "Middle_Tip",
+            "Ring_Side_Swing",
+            "Ring_Base",
+            "Ring_Tip",
+            "Little_Side_Swing",
+            "Little_Base",
+            "Little_Tip",
+            "Wrist"
+        ]
+        # 定义手指关节的映射关系
+        self.state_mapping = {
+            # 拇指
+            0: 2,
+            1: 3,
+            2: 0,
+            3: 1,
+            # 食指
+            4: 13,
+            5: 14,
+            6: 15,
+            # 中指
+            7: 12,
+            8: 7,
+            9: 8,
+            # 无名指
+            10: 4,
+            11: 6,
+            12: 5,
+            # 小拇指
+            13: 11,
+            14: 9,
+            15: 10,
+            # 手腕
+            16: 16
+        }
+        self.subscription = self.create_subscription(
+            JointState,
+            self.control_topci,
+            self.hand_callback,
+            10)
+        # 发布灵巧手状态topic
+        self.publisher_hand_state_range = self.create_publisher(JointState, f'/cb_{self.hand_type}_hand_state', 1)
+        self.publisher_hand_state_arc = self.create_publisher(JointState, f'/cb_{self.hand_type}_hand_state_arc', 1)
+        self.publisher_hand_info = self.create_publisher(String, f'/cb_{self.hand_type}_hand_info', 1)
+        self.hand_api = DexterousHandController()
+        self.hand_api.connect()
+        time.sleep(0.1)
+        self.product_model, self.serial_number, self.software_version, self.hardware_version,_ = self.hand_api.get_device_info()
+        self.hand_api.set_default_velocity(100)
+        time.sleep(0.1)
+        self.hand_api.set_default_torque(500)
+        time.sleep(0.1)
+        self.hand_api.set_joint_velocities([100] * 17)
+        time.sleep(0.1)
+        self.hand_api.set_joint_torques([500] * 17)
+        # 创建并启动线程
+        t = threading.Thread(target=self.run)
+        t.daemon = True  # 设置为守护线程（主线程结束时它会自动退出）
+        t.start()
+        
+
+    def hand_callback(self,msg):
+        positions = list(msg.position)
+        velocity = list(msg.velocity)
+        if not positions:
+            pass
+        else:
+            self.last_pose = positions
+            self.last_vel = velocity
+
+    def run(self):
+        tmp_pose = [0.0] * 17
+        while True:
+            # ----------------  发布L30状态  ----------------- #
+            #pose = self.hand_api.model.get_all_current_positions()
+            speed = self.hand_api.get_current_speed()
+            time.sleep(0.005)
+            state_arc = self.hand_api.get_current_positions()
+            state_range = self.hand_api.normalize_raw_motor_values(state_arc)
+            # 使用映射关系初始化数组
+            tmp_state_r = [0.0] * 17
+            for dst, src in self.state_mapping.items():
+                tmp_state_r[dst] = state_range[src]
+            tmp_state_a = [0.0] * 17
+            for dst_a, src_a in self.state_mapping.items():
+                tmp_state_a[dst_a] = state_arc[src_a]
+            time.sleep(0.005)
+            errors = self.hand_api.get_error_status()
+            info_dic = {
+                "product_model":self.product_model, 
+                "serial_number":self.serial_number,
+                "software_version":self.software_version,
+                "hardware_version":self.hardware_version,
+                "hand_type": self.hand_type,
+                "hand_joint": self.hand_joint,
+                "hand_order": self.joint_name_en,
+                "errors": errors
+            }
+            joint_state_range = self.joint_msg(positions=tmp_state_r,vel=speed, joint_names=self.joint_name_en)
+            joint_state_arc = self.joint_msg(positions=tmp_state_a,vel=speed, joint_names=self.joint_name_en)
+            self.publisher_hand_state_range.publish(joint_state_range)
+            self.publisher_hand_state_arc.publish(joint_state_arc)
+            msg = String()
+            msg.data = json.dumps(info_dic)
+            self.publisher_hand_info.publish(msg)
+            time.sleep(0.005)
+            # -------------------  接收到控制指令驱动电机  ------------------------ #
+            if self.last_pose != []:
+                #['0大拇指侧摆', '1拇指旋转', '2拇指弯曲', '3拇指指尖', '4食指侧摆', '5食指指根弯曲', '6食指指尖', '7中指侧摆', '8中指指根', '9中指指尖', '10无名指侧摆', '11无名指指根', '12无名指指尖', '13小指侧摆', '14小指指根', '15小指指尖', '16手腕']
+                
+                # 拇指
+                tmp_pose[0] = self.last_pose[2]
+                tmp_pose[1] = self.last_pose[3]
+                tmp_pose[2] = self.last_pose[0]
+                tmp_pose[3] = self.last_pose[1]
+                # 无名指
+                tmp_pose[4] = self.last_pose[10]
+                tmp_pose[5] = self.last_pose[12]
+                tmp_pose[6] = self.last_pose[11]
+                # 中指
+                tmp_pose[7] = self.last_pose[8]
+                tmp_pose[8] = self.last_pose[9]
+                tmp_pose[12] = self.last_pose[7]
+                # 小拇指
+                tmp_pose[9] = self.last_pose[14]
+                tmp_pose[10] = self.last_pose[15]
+                tmp_pose[11] = self.last_pose[13]
+                # 食指
+                tmp_pose[13] = self.last_pose[4]
+                tmp_pose[14] = self.last_pose[5]
+                tmp_pose[15] = self.last_pose[6]
+
+                tmp_pose[16] = self.last_pose[16]
+                p = self.hand_api.denormalize_motor_values(tmp_pose)
+                self.hand_api.set_joint_positions(p)
+            time.sleep(0.005)
+
+
+    def joint_msg(self,positions=[],vel = [0.0] * 17,joint_names=[]):
+        
+        joint_state = JointState()
+        joint_state.header.stamp = self.get_clock().now().to_msg()
+        joint_state.name = joint_names
+        joint_state.position = positions
+        joint_state.velocity = vel
+        joint_state.effort = [0.0] * len(positions)
+        return joint_state
+
+    def close(self):
+        self.hand_api.disconnect()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = LinkerHandL30()
+    try:
+        #node.run()
+        rclpy.spin(node)         # 主循环，监听 ROS 回调
+    except KeyboardInterrupt:
+        print("收到 Ctrl+C，准备退出...")
+    finally:      # 关闭 CAN 或其他硬件资源
+        node.close()
+        node.destroy_node()      # 销毁 ROS 节点
+        rclpy.shutdown()         # 关闭 ROS
+        print("程序已退出。")
