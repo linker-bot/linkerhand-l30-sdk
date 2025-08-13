@@ -152,4 +152,3 @@ def _hand_setting_cb(self):
 
 ## 7 WIN使用方法
  - 接通电源，USB转CANFD插在WIN11上位机下直接运行L30FT灵巧手控制系统 for win11.exe即可
-
