@@ -130,21 +130,7 @@ $ ros2 launch gui_control gui_control.launch.py
 /cb_right_hand_state # 实时当前状态 0-255
 /cb_right_hand_state_arc # 实时当前状态角度值
 ```
-## 6.1设置速度示例
-```python
-self.setting_pub = self.create_publisher(String, f'/cb_hand_setting_cmd', 10)
-def _hand_setting_cb(self):
-        dic = {
-            "setting_cmd": "set_speed",
-            "params": {
-                "speed": 255  # 设置速度为100
-            }
-        }
-        msg = String()
-        msg.data = json.dumps(dic)
-        self.setting_pub.publish(msg)
-```
-## 6.2 position说明
+## 6.1 position说明
 ```bash
 ['大拇指侧摆', '拇指旋转', '拇指弯曲', '拇指指尖', '食指侧摆', '食指指根弯曲', '食指指尖', '中指侧摆', '中指指根', '中指指尖', '无名指侧摆', '无名指指根', '无名指指尖', '小指侧摆', '小指指根', '小指指尖', '手腕']
 ```
