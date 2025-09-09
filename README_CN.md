@@ -83,7 +83,7 @@ $ sudo udevadm trigger
 ```bash
 $ mkdir -p linker_hand_l30_sdk/src    #创建目录
 $ cd linker_hand_l30_sdk/src    #进入目录
-$ git clone https://github.com/linkerbotai/linker_hand_l30_sdk.git    #获取SDK
+$ git clone https://github.com/linker-bot/linkerhand_l30_sdk.git    #获取SDK
 $ sudo chmod a+x src/linker_hand_l30/linker_hand_l30/linker_hand_l30.py # 添加执行权限
 ```
 
