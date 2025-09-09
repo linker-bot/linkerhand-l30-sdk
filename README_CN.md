@@ -84,7 +84,7 @@ $ sudo udevadm trigger
 $ mkdir -p linker_hand_l30_sdk/src    #创建目录
 $ cd linker_hand_l30_sdk/src    #进入目录
 $ git clone https://github.com/linker-bot/linkerhand_l30_sdk.git    #获取SDK
-$ sudo chmod a+x src/linker_hand_l30/linker_hand_l30/linker_hand_l30.py # 添加执行权限
+$ sudo chmod a+x src/linkerhand_l30_sdk/linker_hand_l30/linker_hand_l30/linker_hand_l30.py # 添加执行权限
 ```
 
 ## 4.3 确认硬件USB端口，修改配置文件
