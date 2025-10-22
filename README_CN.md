@@ -41,7 +41,7 @@ V1.0.1
 
 * 硬件：amd64_x86/arm64 配备 USB CANFD
 
-## 4.1.1 L30绳驱CANFD版本准备工作
+## 4.1.1 L30绳驱CANFD版本(红色电机)准备工作 USB U2D2版本(黑色电机)请跳转至4.2
 
 将libcanbus用命令解压到/usr/local/lib/目录下面
 
@@ -83,9 +83,10 @@ $ sudo udevadm trigger
 ```bash
 $ mkdir -p linker_hand_l30_sdk/src    #创建目录
 $ cd linker_hand_l30_sdk/src    #进入目录
-$ git clone https://github.com/linker-bot/linkerhand_l30_sdk.git    #获取SDK
 $ # 如果是USB D to D版本请clone V1.0.5版本
 $ git clone -b v1.0.5 https://github.com/linker-bot/linkerhand_l30_sdk.git
+$ # 获取CANFD版本
+$ git clone https://github.com/linker-bot/linkerhand_l30_sdk.git
 $ sudo chmod a+x src/linkerhand_l30_sdk/linker_hand_l30/linker_hand_l30/linker_hand_l30.py # 添加执行权限
 ```
 
