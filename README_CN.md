@@ -90,7 +90,7 @@ $ git clone https://github.com/linker-bot/linkerhand_l30_sdk.git
 $ sudo chmod a+x src/linkerhand_l30_sdk/linker_hand_l30/linker_hand_l30/linker_hand_l30.py # 添加执行权限
 ```
 
-## 4.3 确认硬件USB端口，修改配置文件
+## 4.3 确认硬件USB端口，修改配置文件 [USB-U2D2版本文档](https://github.com/linker-bot/linkerhand-l30-sdk/blob/v1.0.5/README.md)
 - 接通电源，USB转CANFD插在上位机上
 - 修改linker_hand_l30/launch/linker_hand_l30.launch.py，按照参数说明修改左手 or 右手
 
