@@ -87,7 +87,7 @@ $ cd linker_hand_l30_sdk
 $ source ./install/setup.bash
 $ ros2 launch gui_control gui_control.launch.py
 ```
-<img  src="resource/gui.png" width="550">
+<img  src="https://github.com/linker-bot/linkerhand-l30-sdk/blob/main/doc/gui.png" width="550">
 
 - 增加或修改动作示例。在[constants.py](https://github.com/linker-bot/linkerhand-l30-sdk/blob/main/gui_control/gui_control/config/constants.py)文件中可增加或修改动作。
 ```python
