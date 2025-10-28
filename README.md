@@ -89,7 +89,7 @@ $ ros2 launch gui_control gui_control.launch.py
 ```
 <img  src="resource/gui.png" width="550">
 
-- 增加或修改动作示例。在[constants.py]()文件中可增加或修改动作。
+- 增加或修改动作示例。在[constants.py](https://github.com/linker-bot/linkerhand-l30-sdk/blob/main/gui_control/gui_control/config/constants.py)文件中可增加或修改动作。
 ```python
 # 例如增加L30的动作序列
 "L30": HandConfig(
