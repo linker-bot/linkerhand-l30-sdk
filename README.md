@@ -49,7 +49,7 @@ V1.0.1
 ```bash
 $ mkdir -p linker_hand_l30_sdk/src    #创建目录
 $ cd linker_hand_l30_sdk/src    #进入目录
-$ git clone https://github.com/linkerbotai/linker_hand_l30_sdk.git    #获取SDK
+$ git clone https://github.com/linker-bot/linkerhand-l30-sdk.git    #获取SDK
 ```
 
 ## 4.3 确认硬件USB端口，修改配置文件
