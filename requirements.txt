@@ -1,3 +1,4 @@
+numpy==2.2.6
 python-can
 dm_env
 pexpect
@@ -5,7 +6,6 @@ pyquaternion
 pyagxrobots
 pycryptodome
 ipython
-esdk-obs-python
 h5py
 PyYAML
 tqdm
@@ -15,3 +15,4 @@ pyqt5
 pyqtgraph
 dm_control
 uvicorn
+rich

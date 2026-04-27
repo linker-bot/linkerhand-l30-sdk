@@ -18,7 +18,7 @@ from PyQt5.QtGui import QFont
 from .utils.mapping import *
 
 from .config.constants import _HAND_CONFIGS
-
+LOOP_TIME = 300 # 循环动作间隔时间 毫秒
 class ROS2NodeManager(QObject):
     """ROS2节点管理器，处理ROS通信"""
     status_updated = pyqtSignal(str, str)  # 状态类型, 消息内容
@@ -44,19 +44,12 @@ class ROS2NodeManager(QObject):
             self.node.declare_parameter('hand_type', 'left')
             self.node.declare_parameter('hand_joint', 'L10')
             self.node.declare_parameter('topic_hz', 30)
-            self.node.declare_parameter('is_arc', False)
             
             # 获取参数
             self.hand_type = self.node.get_parameter('hand_type').value
             self.hand_joint = self.node.get_parameter('hand_joint').value
             self.hz = self.node.get_parameter('topic_hz').value
-            self.is_arc = self.node.get_parameter('is_arc').value
             
-            if self.is_arc == True:
-                # 创建发布者
-                self.publisher_arc = self.node.create_publisher(
-                    JointState, f'/cb_{self.hand_type}_hand_control_cmd_arc', 10
-                )
             # 创建发布者
             self.publisher = self.node.create_publisher(
                 JointState, f'/cb_{self.hand_type}_hand_control_cmd', 10
@@ -80,7 +73,7 @@ class ROS2NodeManager(QObject):
         while rclpy.ok() and self.node:
             rclpy.spin_once(self.node, timeout_sec=0.1)
 
-    def publish_joint_state(self, positions: List[int]):
+    def publish_joint_state(self, positions: List[int], velocity: int = None):
         """发布关节状态消息"""
         if not self.publisher or not self.node:
             self.status_updated.emit("error", "ROS2发布者未初始化")
@@ -88,8 +81,10 @@ class ROS2NodeManager(QObject):
             
         try:
             self.joint_state.header.stamp = self.node.get_clock().now().to_msg()
-            self.joint_state.position = [float(pos) for pos in positions]
-            # self.joint_state.velocity = [0.1] * len(positions)
+            self.joint_state.position = [int(pos) for pos in positions]
+            # 设置 velocity，如果提供了速度值则使用滑动条的值
+            if velocity is not None:
+                self.joint_state.velocity = [int(velocity)] * len(positions)
             # self.joint_state.effort = [0.01] * len(positions)
             # 如果有关节名称，添加到消息中
             #hand_config = HandConfig.from_hand_type(self.hand_joint)
@@ -101,55 +96,53 @@ class ROS2NodeManager(QObject):
                     self.joint_state.name = hand_config.joint_names
                 
             self.publisher.publish(self.joint_state)
-            if self.is_arc == True:
-                if self.hand_joint == "O6":
-                    if self.hand_type == "left":
-                        pose = range_to_arc_left(positions,self.hand_joint)
-                    elif self.hand_type == "right":
-                        pose = range_to_arc_right(positions,self.hand_joint)
-                elif self.hand_joint == "L7" or self.hand_joint == "L21" or self.hand_joint == "L25":
-                    if self.hand_type == "left":
-                        pose = range_to_arc_left(positions,self.hand_joint)
-                    elif self.hand_type == "right":
-                        pose = range_to_arc_right(positions,self.hand_joint)
-                elif self.hand_joint == "L10":
-                    if self.hand_type == "left":
-                        pose = range_to_arc_left_10(positions)
-                    elif self.hand_type == "right":
-                        pose = range_to_arc_right_10(positions)
-                elif self.hand_joint == "L20":
-                    if self.hand_type == "left":
-                        pose = range_to_arc_left_l20(positions)
-                    elif self.hand_type == "right":
-                        pose = range_to_arc_right_l20(positions)
-                else:
-                    print(f"当前{self.hand_joint} {self.hand_type}不支持弧度转换", flush=True)
-                self.joint_state.position = [float(pos) for pos in pose]
-                self.publisher_arc.publish(self.joint_state)
             self.status_updated.emit("info", "关节状态已发布")
         except Exception as e:
             self.status_updated.emit("error", f"发布失败: {str(e)}")
 
     def publish_speed(self, val: int):
+        joint_len = 0
+        if (self.hand_joint.upper() == "O6" or self.hand_joint.upper() == "L6"):
+            joint_len = 6
+        elif self.hand_joint == "L7":
+            joint_len = 7
+        elif self.hand_joint == "L10":
+            joint_len = 10
+        elif self.hand_joint == "L30":
+            joint_len = 17
+        else:
+            joint_len = 5
         msg = String()
+        v = [val] * joint_len
         data = {
             "setting_cmd": "set_speed",
-            "params": {"hand_type":self.hand_type,"speed": val},
+            "params": {"hand_type":self.hand_type,"speed": v},
         }
         msg.data = json.dumps(data)
-        print(f"速度值：{val}", flush=True)
+        print(f"速度值：{v}", flush=True)
         self.speed_pub.publish(msg)
 
     def publish_torque(self, val: int):
-        print("L30暂不支持扭矩设置")
-        return
+        joint_len = 0
+        if (self.hand_joint.upper() == "O6" or self.hand_joint.upper() == "L6"):
+            joint_len = 6
+        elif self.hand_joint == "L7":
+            joint_len = 7
+        elif self.hand_joint == "L10":
+            joint_len = 10
+        elif self.hand_joint == "L30":
+            joint_len = 17
+        else:
+            joint_len = 5
         msg = String()
+        v = [val] * joint_len
         data = {
             "setting_cmd": "set_max_torque_limits",
-            "params": {"hand_type":self.hand_type,"torque": val},
+            "params": {"hand_type":self.hand_type,"torque": v},
         }
+        
         msg.data = json.dumps(data)
-        print(f"扭矩值：{val}", flush=True)
+        print(f"扭矩值：{v}", flush=True)
         self.torque_pub.publish(msg)
 
     def shutdown(self):
@@ -363,18 +356,22 @@ class HandControlGUI(QWidget):
         for i, (name, value) in enumerate(zip(
             self.hand_config.joint_names, self.hand_config.init_pos
         )):
+            # 获取关节范围
+            joint_limits = self.hand_config.joint_limits
+            if joint_limits and i < len(joint_limits):
+                min_val, max_val = joint_limits[i]
+            else:
+                min_val, max_val = 0, 255  # 默认范围
+            
             # 创建标签
             label = QLabel(f"{name}: {value}")
             label.setMinimumWidth(120)
             
             # 创建滑动条
             slider = QSlider(Qt.Horizontal)
-            if self.hand_config.joint_ranges:
-                rmin, rmax = self.hand_config.joint_ranges.get(name, (0, 255))
-            else:
-                rmin, rmax = 0, 255
-            slider.setRange(rmin, rmax)
-            slider.setValue(value)
+            slider.setRange(min_val, max_val)
+            # 确保初始值在范围内
+            slider.setValue(max(min_val, min(max_val, value)))
             slider.valueChanged.connect(
                 lambda val, idx=i: self.on_slider_value_changed(idx, val)
             )
@@ -462,11 +459,11 @@ class HandControlGUI(QWidget):
         speed_hbox = QHBoxLayout()
         speed_hbox.addWidget(QLabel("速度:"))
         self.speed_slider = QSlider(Qt.Horizontal)
-        self.speed_slider.setRange(0, 999)
-        self.speed_slider.setValue(300)
+        self.speed_slider.setRange(-32767, 32767)
+        self.speed_slider.setValue(32767)
         self.speed_slider.setMinimumWidth(150)
         speed_hbox.addWidget(self.speed_slider)
-        self.speed_val_lbl = QLabel("300")          # 实时值
+        self.speed_val_lbl = QLabel("32767")          # 实时值
         self.speed_val_lbl.setMinimumWidth(30)
         speed_hbox.addWidget(self.speed_val_lbl)
         self.speed_btn = QPushButton("设置速度")
@@ -484,11 +481,11 @@ class HandControlGUI(QWidget):
         torque_hbox = QHBoxLayout()
         torque_hbox.addWidget(QLabel("扭矩:"))
         self.torque_slider = QSlider(Qt.Horizontal)
-        self.torque_slider.setRange(0, 255)
-        self.torque_slider.setValue(255)
+        self.torque_slider.setRange(-2047, 2047)
+        self.torque_slider.setValue(2047)
         self.torque_slider.setMinimumWidth(150)
         torque_hbox.addWidget(self.torque_slider)
-        self.torque_val_lbl = QLabel("255")
+        self.torque_val_lbl = QLabel("2047")
         self.torque_val_lbl.setMinimumWidth(30)
         torque_hbox.addWidget(self.torque_val_lbl)
         self.torque_btn = QPushButton("设置扭矩")
@@ -654,7 +651,7 @@ class HandControlGUI(QWidget):
             self.current_action_index = -1  # 重置索引
             self.cycle_timer = QTimer(self)
             self.cycle_timer.timeout.connect(self.run_next_action)
-            self.cycle_timer.start(400)  # 2秒间隔
+            self.cycle_timer.start(LOOP_TIME)  # 2秒间隔
             self.cycle_button.setText("停止循环运行")
             self.status_updated.emit("info", "开始循环运行预设动作")
             self.run_next_action()  # 立即运行第一个动作
@@ -717,7 +714,8 @@ class HandControlGUI(QWidget):
     def publish_joint_state(self):
         """发布当前关节状态"""
         positions = [slider.value() for slider in self.sliders]
-        self.ros_manager.publish_joint_state(positions)
+        speed_value = self.speed_slider.value()
+        self.ros_manager.publish_joint_state(positions, velocity=speed_value)
 
     def update_status(self, status_type: str, message: str):
         """更新状态显示"""
