@@ -53,8 +53,8 @@ class LinkerHandL30(Node):
         self.hand_api.set_joint_torques([2047] * 17)
         ColorMsg(msg=f"设置扭矩: 2047", color="green")
         # 设置速度
-        self.hand_api.set_velocities([32767] * 17)
-        ColorMsg(msg=f"设置扭矩: 32767", color="green")
+        self.hand_api.set_velocities([150] * 17)
+        ColorMsg(msg=f"设置速度: 150", color="green")
         time.sleep(1)  # 等待手部设备准备就绪
         self.pub_thread = threading.Thread(target=self.pub_hand_state)
         self.pub_thread.daemon = True  # 设置为守护线程

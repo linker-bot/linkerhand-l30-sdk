@@ -64,12 +64,12 @@ class LinkerHandL30API:
         #print(f"设置扭矩:{tor}")
         self.hand_controller.set_torques(tor)
 
-    def set_velocities(self, velocities: List[int] = [16383] * 17)->None:
+    def set_velocities(self, velocities: List[int] = [150] * 17)->None:
         """
-        设置17个关节速度,默认16383
+        设置17个关节速度,默认150
         
         Args:
-            velocities: 17个关节速度值，范围-32767~32767，单位0.732RPM
+            velocities: 17个关节速度值，范围0~150，单位0.732RPM
         """
         if not isinstance(velocities, list) or len(velocities) != 17:
             raise ValueError(f"需要17个长度的list，当前为{len(velocities) if isinstance(velocities, list) else type(velocities)}")
@@ -78,7 +78,7 @@ class LinkerHandL30API:
         for i, val in enumerate(velocities):
             if not isinstance(val, int):
                 raise TypeError(f"第{i}个值必须是int类型，当前为{type(val)}: {val}")
-            vel.append(max(-32767, min(32767, val)))
+            vel.append(max(0, min(150, val)))
         #print(f"设置速度:{vel}")
         self.hand_controller.set_velocities(vel)
 

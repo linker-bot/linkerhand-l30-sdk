@@ -459,11 +459,11 @@ class HandControlGUI(QWidget):
         speed_hbox = QHBoxLayout()
         speed_hbox.addWidget(QLabel("速度:"))
         self.speed_slider = QSlider(Qt.Horizontal)
-        self.speed_slider.setRange(-32767, 32767)
-        self.speed_slider.setValue(32767)
+        self.speed_slider.setRange(0, 150)
+        self.speed_slider.setValue(150)
         self.speed_slider.setMinimumWidth(150)
         speed_hbox.addWidget(self.speed_slider)
-        self.speed_val_lbl = QLabel("32767")          # 实时值
+        self.speed_val_lbl = QLabel("150")          # 实时值
         self.speed_val_lbl.setMinimumWidth(30)
         speed_hbox.addWidget(self.speed_val_lbl)
         self.speed_btn = QPushButton("设置速度")
@@ -481,7 +481,7 @@ class HandControlGUI(QWidget):
         torque_hbox = QHBoxLayout()
         torque_hbox.addWidget(QLabel("扭矩:"))
         self.torque_slider = QSlider(Qt.Horizontal)
-        self.torque_slider.setRange(-2047, 2047)
+        self.torque_slider.setRange(0, 2047)
         self.torque_slider.setValue(2047)
         self.torque_slider.setMinimumWidth(150)
         torque_hbox.addWidget(self.torque_slider)
