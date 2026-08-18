@@ -8,6 +8,10 @@ API for CANFD protocol control
 import time,os,sys
 from typing import  List, Optional, Tuple, Dict, Any
 import numpy as np
+# 两个控制类模块：优先旧版 v6_canfd，初始化失败时自动回退 v6_2_canfd
+from .core import linker_hand_l30_v6_canfd as hand_canfd_v1
+from .core import linker_hand_l30_v6_2_canfd as hand_canfd_v2
+# 共用常量/枚举（两个模块导出接口一致，从 v1 引入即可）
 from .core.linker_hand_l30_v6_canfd import (
     L30DexterousHandController,
     L30CANFDProtocol,
@@ -20,30 +24,100 @@ from .core.linker_hand_l30_v6_canfd import (
 from .utils.color_msg import ColorMsg
 
 class LinkerHandL30API:
-    def __init__(self, hand_joint="L30", hand_type="right", device_id=0x06,canfd_id=0) -> None:
+    # 控制类候选模块，按顺序尝试初始化：优先旧版 v6_canfd，失败则回退 v6_2_canfd
+    _CONTROLLER_MODULES = [
+        ("V6", hand_canfd_v1),
+        ("V6.2", hand_canfd_v2),
+    ]
+
+    def __init__(self, hand_joint="L30", hand_type="right", device_id=0x06, canfd_id=0,
+                 comm_type="libcanbus", channel=None, bitrate=1000000,
+                 dbitrate=5000000, auto_setup=True) -> None:
         """
         Args:
             hand_joint: 手关节类型，默认L30
             hand_type: 手类型，默认right
             device_id: 设备ID，默认0x06, 灵巧手ID
             canfd_id: CANFD ID，默认0，CANFD盒子id编号，一般第一个插入的盒子id为0，第二个插入的盒子id为1，依此类推
+            comm_type: 通信后端 —— "libcanbus"(默认, 蓝色/黑色 CANFD 盒, 厂商私有库) 或
+                       "socketcan"(内核 can0 + python-can, 透明塑封 USB-CANFD 设备)
+            channel: 仅 socketcan 生效——接口名(默认 "can0")；libcanbus 忽略
+            bitrate: 仅 socketcan 生效——仲裁段波特率(须与灵巧手一致)
+            dbitrate: 仅 socketcan 生效——数据段波特率
+            auto_setup: 仅 socketcan 生效——True 时自动 sudo ip link 拉起接口
         """
-        
+
         self.hand_joint = hand_joint
         self.hand_type = hand_type
-        self.hand_controller = L30DexterousHandController(device_id=device_id,canfd_id=canfd_id)
-        ColorMsg(msg=f"开始连接L30...", color="yellow")
-        con = self.hand_controller.connect()
+        self.hand_controller = None
+        # 通信后端参数(透传给控制类)；channel 为空时按后端取默认(socketcan->can0, libcanbus->0)
+        if channel is None:
+            channel = "can0" if comm_type == "socketcan" else 0
+        self._comm_kwargs = dict(comm_type=comm_type, channel=channel,
+                                 bitrate=bitrate, dbitrate=dbitrate, auto_setup=auto_setup)
+
+        # 依次尝试各控制类模块：仅当 CANFD 连接成功且 hand_type 匹配才算成功；
+        # 由于旧版可能只是成功打开 CANFD 盒子、却按旧协议读不到正确 hand_type，
+        # 因此把 hand_type 不匹配也视为该控制类初始化失败，自动回退到下一个控制类。
+        last_reason = None
+        for name, module in self._CONTROLLER_MODULES:
+            ColorMsg(msg=f"开始使用 {name} 连接L30...", color="yellow")
+            controller, reason = self._try_init_controller(module, device_id, canfd_id)
+            if controller is not None:
+                self.hand_controller = controller
+                ColorMsg(msg=f"{name} 初始化成功", color="green")
+                break
+            last_reason = reason
+            ColorMsg(msg=f"{name} 初始化失败({reason})，尝试下一个控制类...", color="red")
+        print(self.hand_type, flush=True)
+        if self.hand_controller is None:
+            ColorMsg(msg=f"Linker Hand L30 连接失败，所有控制类初始化均失败: {last_reason}", color="red")
+            # hand_type 不匹配时保持原有异常类型，其余情况视为初始化失败
+            if last_reason and "hand_type" in last_reason:
+                raise ValueError("Hand type is incorrect")
+            raise RuntimeError("Linker Hand L30 CANFD 初始化失败")
+
         time.sleep(0.001)
-        if con == False:
-            ColorMsg(msg=f"Linker Hand L30 连接失败，CANFD连接失败", color="red")
-        elif self.hand_type == self.hand_controller.hand_type:
-            ColorMsg(msg=f"连接成功,Linker Hand {self.hand_joint} - {self.hand_type}在CANFD编号为{canfd_id}设备上", color="green")
-        else:
-            ColorMsg(msg=f"Linker Hand L30 连接失败，hand_type不匹配", color="red")
-            raise ValueError("Hand type is incorrect")
+        ColorMsg(msg=f"连接成功,Linker Hand {self.hand_joint} - {self.hand_type}在CANFD编号为{canfd_id}设备上", color="green")
+
         self.joint_name_en = JOINT_NAME_EN
         self.joint_name_cn = JOINT_NAME_CN
+
+    def _try_init_controller(self, module, device_id, canfd_id):
+        """
+        尝试用指定控制类模块创建控制器并连接。
+
+        成功标准：CANFD 连接成功 且 读取到的 hand_type 与期望一致。
+
+        Args:
+            module: 控制类模块，须提供 L30DexterousHandController
+            device_id: 设备ID(灵巧手ID)
+            canfd_id: CANFD 盒子编号
+        Returns:
+            (controller, reason):
+              - 成功返回 (控制器实例, None)
+              - 失败返回 (None, 失败原因字符串)
+        """
+        try:
+            controller = module.L30DexterousHandController(
+                device_id=device_id, canfd_id=canfd_id, **self._comm_kwargs)
+            result = controller.connect()
+            # connect 可能返回 (bool, hand_type) 元组或 bool，统一取成功标志
+            ok = result[0] if isinstance(result, tuple) else bool(result)
+            if not ok:
+                controller.disconnect()
+                return None, "CANFD连接失败"
+            # 校验左右手类型：不匹配则视为该控制类失败，交由外层回退
+            if self.hand_type != controller.hand_type:
+                ColorMsg(msg=f"hand_type不匹配(期望={self.hand_type}, 实际={controller.hand_type})", color="red")
+                controller.disconnect()
+                return None, f"hand_type不匹配(期望={self.hand_type}, 实际={controller.hand_type})"
+            return controller, None
+        except Exception as e:
+            ColorMsg(msg=f"控制类初始化异常: {e}", color="red")
+            return None, f"异常: {e}"
+
+
         
 
     def set_joint_torques(self, torques: List[int] = [1024] * 17)->None:
@@ -193,8 +267,10 @@ class LinkerHandL30API:
         self.hand_controller.disconnect()
 
     def __del__(self) -> None:
-        self.hand_controller.disconnect()
-        time.sleep(0.001)
+        # 初始化失败时 hand_controller 可能为 None，判空避免析构噪音
+        if self.hand_controller is not None:
+            self.hand_controller.disconnect()
+            time.sleep(0.001)
 
 if __name__ == "__main__":
     api = LinkerHandL30API(hand_joint="L30", hand_type="right", device_id=0x06)

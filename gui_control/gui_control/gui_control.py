@@ -1,4 +1,5 @@
 import sys
+import os
 import time, json
 import threading
 from dataclasses import dataclass
@@ -81,10 +82,10 @@ class ROS2NodeManager(QObject):
             
         try:
             self.joint_state.header.stamp = self.node.get_clock().now().to_msg()
-            self.joint_state.position = [int(pos) for pos in positions]
+            self.joint_state.position = [float(pos) for pos in positions]
             # 设置 velocity，如果提供了速度值则使用滑动条的值
             if velocity is not None:
-                self.joint_state.velocity = [int(velocity)] * len(positions)
+                self.joint_state.velocity = [float(velocity)] * len(positions)
             # self.joint_state.effort = [0.01] * len(positions)
             # 如果有关节名称，添加到消息中
             #hand_config = HandConfig.from_hand_type(self.hand_joint)
@@ -186,7 +187,20 @@ class HandControlGUI(QWidget):
         """初始化用户界面"""
         # 设置窗口属性
         self.setWindowTitle(f'灵巧手控制界面 - {self.hand_type} {self.hand_joint}')
-        self.setMinimumSize(1200, 900)
+        # 依据当前屏幕可用区域自适应尺寸（逻辑像素，已随高 DPI 缩放），
+        # 避免在缩放/小屏显示器上窗口超出屏幕、无法完整显示或操作。
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            init_w = min(1200, int(avail.width() * 0.9))
+            init_h = min(900, int(avail.height() * 0.9))
+            self.resize(init_w, init_h)
+            # 最小尺寸同样限制在可用区域内，保证任何缩放比例下都能完整显示
+            self.setMinimumSize(min(900, int(avail.width() * 0.5)),
+                                min(650, int(avail.height() * 0.5)))
+        else:
+            self.resize(1200, 900)
+            self.setMinimumSize(900, 650)
         
         # 设置样式
         self.setStyleSheet("""
@@ -757,9 +771,22 @@ class HandControlGUI(QWidget):
 def main(args=None):
     """主函数"""
     try:
+        # ---- 适配显示器缩放（高 DPI）：必须在创建 QApplication 之前设置 ----
+        # 让 Qt 跟随操作系统/显示器的缩放比例（含分数缩放），px 尺寸与字体会按屏幕
+        # 缩放因子自动放大，避免在高分屏/缩放显示器上界面过小或控件错位。
+        os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+        try:
+            # Qt 5.14+：分数缩放采用 PassThrough，避免取整造成的留白/裁切
+            QApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        except Exception:
+            pass
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
         # 创建ROS2节点管理器
         ros_manager = ROS2NodeManager()
-        
+
         # 创建Qt应用
         app = QApplication(sys.argv)
         

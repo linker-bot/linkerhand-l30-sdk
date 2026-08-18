@@ -27,6 +27,12 @@ from ctypes import *
 
 import numpy as np
 
+from .linker_hand_l30_canfd_comm import (
+    LibCanBusTransport,
+    SocketCANTransport,
+    create_transport,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -331,11 +337,27 @@ class L30CANFDProtocol:
     DATA_BAUD = 5000000
     DEFAULT_DEVICE_ID = 0x06
 
-    def __init__(self, device_id: int = 0x06,canfd_device=0):
+    def __init__(self, device_id: int = 0x06, canfd_device=0, channel=0,
+                 comm_type: str = "libcanbus", bitrate: int = 1000000,
+                 dbitrate: int = 5000000, auto_setup: bool = True):
+        """
+        Args:
+            device_id: 灵巧手设备 ID
+            canfd_device: CANFD 设备(盒子)索引, 仅 libcanbus 后端使用
+            channel: 通道——libcanbus 为 int(默认 0), socketcan 为接口名 str(如 "can0")
+            comm_type: 通讯后端 —— "libcanbus"(默认, 厂商私有库) 或
+                       "socketcan"(内核 can0 + python-can, 透明塑封 USB-CANFD 设备)
+            bitrate/dbitrate/auto_setup: 仅 socketcan 使用——仲裁/数据段波特率与
+                       是否自动拉起接口
+        """
         self.device_id = device_id
         self.canfd_device = canfd_device
-        self.canDLL = None
-        self.channel = 0
+        self.channel = channel
+        self.comm_type = comm_type
+        # 可插拔传输后端：libcanbus(默认) 或 socketcan；实际收发委托给它
+        self.transport = create_transport(
+            comm_type=comm_type, canfd_device=canfd_device, channel=channel,
+            bitrate=bitrate, dbitrate=dbitrate, auto_setup=auto_setup)
         self.is_connected = False
         self.frame_counter = 0
         self._pressure_matrices = {
@@ -347,70 +369,23 @@ class L30CANFDProtocol:
         }
 
     # =========================================================================
-    # 底层通信方法
+    # 底层通信方法（委托可插拔传输后端）
     # =========================================================================
 
     def initialize(self) -> bool:
-        """初始化CANFD通信"""
-        try:
-            logger.info("正在初始化CANFD通信...")
-
-            CDLL("/usr/local/lib/libusb-1.0.so", RTLD_GLOBAL)
-            time.sleep(0.1)
-            self.canDLL = cdll.LoadLibrary("/usr/local/lib/libcanbus.so")
-
-            logger.info("开始扫描CANFD设备...")
-            ret = self.canDLL.CAN_ScanDevice()
-            if ret <= 0:
-                logger.error(f"未找到CANFD设备, 错误码: {ret}")
-                return False
-            print(f"找到 {ret} 个设备", flush=True)
-
-            ret = self.canDLL.CAN_OpenDevice(self.canfd_device, self.channel)
-            if ret != STATUS_OK:
-                logger.error(f"打开设备失败, 错误码: {ret}")
-                return False
-            print(f"设备通道 {self.channel} 打开成功", flush=True)
-
-            can_config = CanFD_Config(
-                self.ARBITRATION_BAUD, self.DATA_BAUD,
-                0x0, 0x0, 0x0, 0x0,
-                0x0, 0x0, 0x0, 0x0,
-                0x0, 0x0, 0x1
-            )
-
-            ret = self.canDLL.CANFD_Init(self.canfd_device, self.channel, byref(can_config))
-            if ret != STATUS_OK:
-                logger.error(f"CANFD初始化失败, 错误码: {ret}")
-                self.canDLL.CAN_CloseDevice(self.canfd_device, self.channel)
-                return False
-
-            ret = self.canDLL.CAN_SetFilter(self.canfd_device, self.channel, 0, 0, 0, 0, 1)
-            if ret != STATUS_OK:
-                logger.error(f"设置过滤器失败, 错误码: {ret}")
-                self.canDLL.CAN_CloseDevice(self.canfd_device, self.channel)
-                return False
-
-            self.is_connected = True
+        """初始化CANFD通信（委托传输后端：libcanbus 或 socketcan）"""
+        logger.info("正在初始化CANFD通信...")
+        ok = self.transport.initialize()
+        self.is_connected = ok
+        if ok:
             logger.info("CANFD通信初始化完成")
-            return True
-
-        except OSError as e:
-            logger.error(f"加载CAN库失败: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"CANFD初始化异常: {e}")
-            return False
+        return ok
 
     def close(self) -> None:
-        """关闭CANFD连接"""
-        if self.canDLL and self.is_connected:
-            try:
-                self.canDLL.CAN_CloseDevice(self.canfd_device, self.channel)
-                self.is_connected = False
-                logger.info("CANFD连接已关闭")
-            except Exception as e:
-                logger.error(f"关闭CANFD连接失败: {e}")
+        """关闭CANFD连接（委托传输后端）"""
+        self.transport.close()
+        self.is_connected = False
+        logger.info("CANFD连接已关闭")
 
     def _increment_frame_counter(self) -> int:
         """递增帧计数器"""
@@ -508,7 +483,7 @@ class L30CANFDProtocol:
         subcommand: int = 0
     ) -> bool:
         """
-        发送CANFD消息
+        发送CANFD消息（委托传输后端）
 
         Args:
             command: 命令码
@@ -533,31 +508,13 @@ class L30CANFDProtocol:
             self._increment_frame_counter()
             data_len = min(len(data), 62)
 
-            buffer = (c_ubyte * 64)()
-            buffer[0] = data_len
-            buffer[1] = self._build_transaction_control()
+            # 数据段有效字节: BYTE0 长度 / BYTE1 事务控制 / BYTE2~ 数据
+            payload = bytearray(2 + data_len)
+            payload[0] = data_len
+            payload[1] = self._build_transaction_control()
+            payload[2:2 + data_len] = bytes(data[:data_len])
 
-            for i in range(data_len):
-                buffer[i + 2] = data[i]
-
-            dlc = get_dlc_from_length(data_len + 2)
-
-            msg = CanFD_Msg(
-                ID=frame_id,
-                TimeStamp=0,
-                FrameType=4,
-                DLC=dlc,
-                ExternFlag=1,
-                RemoteFlag=0,
-                BusSatus=0,
-                ErrSatus=0,
-                TECounter=0,
-                RECounter=0,
-                Data=buffer
-            )
-            time.sleep(0.001)
-            ret = self.canDLL.CANFD_Transmit(self.canfd_device, self.channel, byref(msg), 1, 100)
-            return ret == 1
+            return self.transport.send(frame_id, bytes(payload))
 
         except Exception as e:
             logger.error(f"发送消息异常: {e}")
@@ -570,7 +527,7 @@ class L30CANFDProtocol:
         expected_command: int = None
     ) -> List[Tuple[int, bytes, Dict]]:
         """
-        接收CANFD消息
+        接收CANFD消息（委托传输后端取回原始帧后解析）
 
         Returns:
             List of (frame_id, data, parsed_info)
@@ -579,29 +536,9 @@ class L30CANFDProtocol:
             return []
 
         try:
-            class MsgArray(Structure):
-                _fields_ = [('SIZE', c_uint16), ('ARRAY', CanFD_Msg * 100)]
-
-                @property
-                def ptr(self):
-                    return cast(byref(self.ARRAY), POINTER(CanFD_Msg))
-
-            receive_buffer = MsgArray()
-            receive_buffer.SIZE = 100
-
-            ret = self.canDLL.CANFD_Receive(self.canfd_device, self.channel, receive_buffer.ptr, 100, timeout_ms)
-            #time.sleep(0.001)
-
-            if ret <= 0:
-                return []
-
             messages = []
-            for i in range(ret):
-                msg = receive_buffer.ARRAY[i]
-                data_len = get_length_from_dlc(msg.DLC)
-                data = bytes(msg.Data[:data_len])
-
-                parsed = self._parse_canfd_id(msg.ID)
+            for frame_id, data in self.transport.receive(timeout_ms):
+                parsed = self._parse_canfd_id(frame_id)
                 parsed['transaction'] = self._parse_transaction_control(data[1]) if len(data) > 1 else {}
 
                 if filter_device_id and parsed['device_id'] != self.device_id:
@@ -610,7 +547,7 @@ class L30CANFDProtocol:
                 if expected_command is not None and parsed['command'] != expected_command:
                     continue
 
-                messages.append((msg.ID, data, parsed))
+                messages.append((frame_id, data, parsed))
 
             return messages
 
@@ -971,8 +908,24 @@ class L30DexterousHandController:
 
     JOINT_COUNT = 17
 
-    def __init__(self, device_id: int = 0x06, canfd_id=0):
-        self.protocol = L30CANFDProtocol(device_id, canfd_id)
+    def __init__(self, device_id: int = 0x06, canfd_id=0, comm_type: str = "libcanbus",
+                 channel=None, bitrate: int = 1000000, dbitrate: int = 5000000,
+                 auto_setup: bool = True):
+        """
+        Args:
+            device_id: 灵巧手设备 ID
+            canfd_id: CANFD 设备(盒子)索引
+            comm_type: 通讯后端 —— "libcanbus"(默认, 厂商私有库) 或
+                       "socketcan"(内核 can0 + python-can, 透明塑封 USB-CANFD 设备)
+            channel: 通道——libcanbus 为 int(默认 0), socketcan 为接口名(默认 "can0")
+            bitrate/dbitrate/auto_setup: 仅 socketcan 使用
+        """
+        # channel 未显式指定时按后端给默认值: socketcan -> "can0", libcanbus -> 0
+        if channel is None:
+            channel = "can0" if comm_type == "socketcan" else 0
+        self.protocol = L30CANFDProtocol(device_id, canfd_id, channel=channel,
+                                         comm_type=comm_type, bitrate=bitrate,
+                                         dbitrate=dbitrate, auto_setup=auto_setup)
         self.device_id = device_id
         self.hand_type: Optional[str] = None
         self.joints = {joint.id: joint for joint in JOINT_DEFINITIONS}
@@ -991,7 +944,13 @@ class L30DexterousHandController:
             print("关节使能失败, 继续尝试...")
         time.sleep(0.1)
 
-        hand_type = self.protocol.query_device_type()
+        # 设备类型查询偶发超时/丢包，重试若干次避免误判为 hand_type 不匹配
+        hand_type = None
+        for _ in range(5):
+            hand_type = self.protocol.query_device_type()
+            if hand_type:
+                break
+            time.sleep(0.05)
         if hand_type:
             self.hand_type = hand_type
             logger.info(f"连接成功: 设备ID={self.device_id}, 类型={hand_type}")

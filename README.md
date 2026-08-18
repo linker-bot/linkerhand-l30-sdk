@@ -23,6 +23,13 @@ LinkerHandROS2 SDK当前支持Ubuntu22.04 ROS humble Python3.10 及以上环境
 
 
 # 3. **版本说明**
+V3.1.0
+
+1. 支持 L30 版 Linker Hand ROS2 驱动（HOP v0.0.3 协议）。
+2. 支持 `libcanbus`（金属 CANFD 盒）与 `socketcan`（透明塑封 USB-CANFD）两种通信后端。
+3. GUI 控制界面，带有手指舞、数字手势等预设动作。
+4. 可选指尖触觉传感器数据发布。
+
 V3.0.2
 1. 根据掌型，电机运动范围改变
 
@@ -46,7 +53,17 @@ V1.0.1
 1. 支持L30线驱版本LinkeerHand灵巧手
 2. GUI控制界面
 
-## 4.1 系统与硬件需求
+
+
+
+
+## 4.0 系统与硬件需求
+支持以下两类 CANFD 设备，对应不同的通信后端 `comm_type`：
+
+| CANFD 设备 | comm_type | 说明 |
+| --- | --- | --- |
+| 蓝色 / 黑色金属 CANFD 盒 | `libcanbus` | 使用厂商私有库 `libcanbus.so`，需按 5.2 解压安装 |
+| 透明塑封 USB-CANFD 设备 | `socketcan` | 内核原生 SocketCAN（`can0` + python-can），无需安装驱动 |
 
 * 操作系统：Ubuntu24.04
 
@@ -55,7 +72,7 @@ V1.0.1
 * Python版本：V3.12
 
 * 硬件：amd64_x86/arm64 配备 5v标准USB接口
-
+## 4.1 金属 CANFD 盒配置 (comm_type = libcanbus)
 将libcanbus用命令解压到/usr/local/lib/目录下面
 
 tar -xvf libcanbus.tar -C /usr/local/lib/
@@ -88,6 +105,11 @@ $ sudo udevadm trigger
 ```
 重启系统。
 
+## 4.1.1 透明塑封 USB-CANFD 设备配置 (comm_type = socketcan)
+
+1. 确保 type-c 接口下方的开关拨到 **Linux 模式**（若 `lsusb` 显示为 `STM32 Virtual ComPort`，说明仍是串口模式）。
+2. 重新插拔 USB，确认接口枚举为原生 CAN：
+3. 免驱
 
 ## 硬件V5版以前早期CANFD版本请跳转至[L30 CANFD](https://github.com/linker-bot/linkerhand-l30-sdk/tree/v2.0.0)
 

@@ -6,6 +6,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import signal
 import sys
+import os
 import json
 import numpy as np
 from std_msgs.msg import String
@@ -61,7 +62,17 @@ class PressureDiagram(Node, QtWidgets.QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("Robotic Hand Sensor Fusion Interface")
-        self.resize(1600, 900)
+        # 依据当前屏幕可用区域自适应初始尺寸（逻辑像素，已随高 DPI 缩放），
+        # 避免在缩放/小屏显示器上窗口超出屏幕、无法完整显示。
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            self.resize(min(1600, int(avail.width() * 0.9)),
+                        min(900, int(avail.height() * 0.9)))
+            self.setMinimumSize(min(1000, int(avail.width() * 0.5)),
+                                min(600, int(avail.height() * 0.5)))
+        else:
+            self.resize(1600, 900)
         self.setStyleSheet("background-color: #0f172a;")
         
         central_widget = QtWidgets.QWidget()
@@ -398,6 +409,19 @@ def signal_handler(sig, frame):
 
 def main(args=None):
     rclpy.init(args=args)
+
+    # ---- 适配显示器缩放（高 DPI）：必须在创建 QApplication 之前设置 ----
+    # 让 Qt 跟随操作系统/显示器的缩放比例（含分数缩放），px 尺寸与字体会按屏幕
+    # 缩放因子自动放大，避免在高分屏/缩放显示器上界面过小或控件错位。
+    os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+    try:
+        # Qt 5.14+：分数缩放采用 PassThrough，避免取整造成的留白/裁切
+        QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
+            QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    except Exception:
+        pass
+    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
 
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle('Fusion')

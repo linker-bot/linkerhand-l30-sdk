@@ -17,14 +17,29 @@ class LinkerHandL30(Node):
         self.declare_parameter('hand_joint', 'L30')
         self.declare_parameter('canfd_id', 0)
         self.declare_parameter('is_touch', False)
-        
+        # 通信后端相关参数
+        self.declare_parameter('comm_type', 'libcanbus')  # libcanbus | socketcan
+        self.declare_parameter('channel', 'can0')          # 仅 socketcan: 接口名
+        self.declare_parameter('bitrate', 1000000)         # 仅 socketcan: 仲裁段波特率
+        self.declare_parameter('dbitrate', 5000000)        # 仅 socketcan: 数据段波特率
+        self.declare_parameter('auto_setup', True)         # 仅 socketcan: 自动拉起接口
+
         # 获取参数值
         self.hand_type = self.get_parameter('hand_type').value
         self.hand_joint = self.get_parameter('hand_joint').value
         self.canfd_id = self.get_parameter('canfd_id').value
         self.is_touch = self.get_parameter('is_touch').value
+        self.comm_type = self.get_parameter('comm_type').value
+        self.channel = self.get_parameter('channel').value
+        self.bitrate = self.get_parameter('bitrate').value
+        self.dbitrate = self.get_parameter('dbitrate').value
+        self.auto_setup = self.get_parameter('auto_setup').value
         self.hand_setting_sub = self.create_subscription(String,'/cb_hand_setting_cmd', self.hand_setting_cb, 10)
-        self.hand_api = LinkerHandL30API(hand_joint=self.hand_joint, hand_type=self.hand_type, device_id=0x06,canfd_id=self.canfd_id)
+        self.hand_api = LinkerHandL30API(hand_joint=self.hand_joint, hand_type=self.hand_type,
+                                         device_id=0x06, canfd_id=self.canfd_id,
+                                         comm_type=self.comm_type, channel=self.channel,
+                                         bitrate=self.bitrate, dbitrate=self.dbitrate,
+                                         auto_setup=self.auto_setup)
         self.last_pose = []
         self.last_vel = []
         self.set_speed = []
@@ -53,8 +68,8 @@ class LinkerHandL30(Node):
         self.hand_api.set_joint_torques([2047] * 17)
         ColorMsg(msg=f"设置扭矩: 2047", color="green")
         # 设置速度
-        self.hand_api.set_velocities([150] * 17)
-        ColorMsg(msg=f"设置速度: 150", color="green")
+        self.hand_api.set_velocities([250] * 17)
+        ColorMsg(msg=f"设置速度: 250", color="green")
         time.sleep(1)  # 等待手部设备准备就绪
         self.pub_thread = threading.Thread(target=self.pub_hand_state)
         self.pub_thread.daemon = True  # 设置为守护线程
@@ -160,9 +175,9 @@ class LinkerHandL30(Node):
         joint_state = JointState()
         joint_state.header.stamp = self.get_clock().now().to_msg()
         joint_state.name = joint_names
-        joint_state.position = positions
-        joint_state.velocity = velocity
-        joint_state.effort = effort
+        joint_state.position = [float(x) for x in positions]
+        joint_state.velocity = [float(x) for x in velocity]
+        joint_state.effort = [float(x) for x in effort]
         return joint_state
     
     
